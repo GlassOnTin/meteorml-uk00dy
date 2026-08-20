@@ -100,10 +100,15 @@ def make_arrays(rows, data_dir, size, args, training):
             targets.append((teacher, args.distill))
         if not targets:
             continue
-        if r["lens"] == "fisheye":
+        # fisheye down-weighting applies to METEORS only: positive trail
+        # morphology is optics-specific, but artefact negatives (thin satellite
+        # streaks, clouds, noise) transfer across lenses and are scarce at 4mm.
+        if r["lens"] == "fisheye" and label == "meteor":
             if not training or args.fisheye_weight <= 0:
                 continue
             targets = [(y, w * args.fisheye_weight) for y, w in targets]
+        elif r["lens"] == "fisheye" and not training:
+            continue
         png = os.path.join(data_dir, r["night"], r["crop_png"])
         img = load_crop(png, size)
         for y, w in targets:
