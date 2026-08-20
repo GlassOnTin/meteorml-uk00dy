@@ -62,7 +62,9 @@ def main():
     # Threshold sweep on the storm night -> lowest threshold meeting the budget
     storm = [r for r in rows if r["night"] == STORM_NIGHT]
     labeled = [r for r in rows if r["label"] in ("meteor", "artefact")]
-    meteors = [r for r in labeled if r["label"] == "meteor"]
+    # Keep-rate is judged on current-optics meteors only; the deployed model
+    # will never see fisheye trails again.
+    meteors = [r for r in labeled if r["label"] == "meteor" and r["lens"] == "4mm"]
     sweep = []
     for thr in np.arange(0.05, 0.96, 0.01):
         fp = sum(1 for r in storm if r["cand"] > thr) / max(len(storm), 1)

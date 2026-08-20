@@ -78,11 +78,14 @@ def make_arrays(rows, data_dir, size, args, training):
             targets.append((0.0, w_neg))
         elif training and args.distill > 0 and teacher is not None:
             targets.append((teacher, args.distill))
-        # --distill-all: every crop ALSO pulls toward the teacher's score, labels
-        # included -- the anti-forgetting term that keeps hyper_model's storm and
+        # --distill-all: artefact-labeled crops ALSO pull toward the teacher's
+        # score -- the anti-forgetting term that keeps hyper_model's storm and
         # satellite priors when the labeled set is tiny. (Once every crop is
         # labeled, plain distillation has no unlabeled rows and goes inert.)
-        if training and args.distill_all and args.distill > 0 and teacher is not None and label:
+        # Meteor rows are exempt: they are exactly where the teacher is wrong,
+        # and anchoring them to it caps how far the fine-tune can lift them.
+        if (training and args.distill_all and args.distill > 0
+                and teacher is not None and label == "artefact"):
             targets.append((teacher, args.distill))
         if not targets:
             continue
