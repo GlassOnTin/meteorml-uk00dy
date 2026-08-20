@@ -1,0 +1,16 @@
+[project]
+name = "meteorml-uk00dy"
+version = "0.1.0"
+description = "Station-adapted fine-tune of the RMS/GMN meteor-vs-artefact classifier for a mono IMX296 + 4mm f/0.95 zenith camera (UK00DY)"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    "tensorflow>=2.20",
+    "ai-edge-litert",
+    "pillow",
+    "numpy",
+    "pandas",
+]
+
+[project.optional-dependencies]
+gpu = ["tensorflow[and-cuda]>=2.20"]
+plots = ["matplotlib"]
