@@ -130,13 +130,17 @@ def augment_dataset(x, y, w, batch, seed=17, photometric=True):
         h, wd = img.shape[0], img.shape[1]
         img = tf.image.resize_with_crop_or_pad(img, h + 6, wd + 6)
         img = tf.image.random_crop(img, (h, wd, 1))
-        if photometric:
-            # CAUTION: brightness/contrast jitter attacks the very cue that
-            # separates thick-bright meteor streaks from thin-faint satellite
-            # trails -- measured to collapse satellite rejection. Off for v2+.
-            img = tf.image.random_brightness(img, 0.1)
-            img = tf.image.random_contrast(img, 0.8, 1.2)
-            img = img + tf.random.normal(tf.shape(img), stddev=0.01)
+        # Photometric jitter is CLASS-CONDITIONAL: applied to meteor-targets
+        # only. On negatives, brightness jitter destroys the thin-faint
+        # satellite vs thick-bright meteor cue (measured: satellite FP 45%);
+        # on positives it buys robustness to faint meteors. `photometric`
+        # extends it to all samples (the measured-bad v1 behaviour).
+        def jitter(im):
+            im = tf.image.random_brightness(im, 0.1)
+            im = tf.image.random_contrast(im, 0.8, 1.2)
+            return im + tf.random.normal(tf.shape(im), stddev=0.01)
+        img = tf.cond(tf.logical_or(photometric, label >= 0.5),
+                      lambda: jitter(img), lambda: img)
         return tf.clip_by_value(img, 0.0, 1.0), label, weight
 
     ds = tf.data.Dataset.from_tensor_slices((x, y, w))
