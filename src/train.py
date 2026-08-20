@@ -75,7 +75,18 @@ def make_arrays(rows, data_dir, size, args, training):
         if label == "meteor":
             targets.append((1.0, w_pos))
         elif label == "artefact":
-            targets.append((0.0, w_neg))
+            w = w_neg
+            # Trail-shaped artefacts (satellites/planes; >12 frames, same rule
+            # as the harvester's kin_hint) are the confusable class and rare
+            # next to storm-cloud negatives -- without extra weight, augmented
+            # positives teach "streak = meteor" and satellite scores collapse
+            # toward 1.
+            try:
+                if int(r["n_frames"]) > 12:
+                    w *= args.trail_neg_weight
+            except (KeyError, ValueError):
+                pass
+            targets.append((0.0, w))
         elif training and args.distill > 0 and teacher is not None:
             targets.append((teacher, args.distill))
         # --distill-all: artefact-labeled crops ALSO pull toward the teacher's
@@ -139,6 +150,7 @@ def main():
     ap.add_argument("--distill", type=float, default=0.2)
     ap.add_argument("--distill-all", action="store_true")
     ap.add_argument("--pos-weight-cap", type=float, default=5.0)
+    ap.add_argument("--trail-neg-weight", type=float, default=3.0)
     ap.add_argument("--fisheye-weight", type=float, default=0.3)
     ap.add_argument("--pseudo-labels", action="store_true")
     ap.add_argument("--seed", type=int, default=17)
