@@ -168,12 +168,14 @@ def main():
 
     out = os.path.join("runs", args.tag)
     os.makedirs(out, exist_ok=True)
-    # PR-AUC needs positives in val; a storm-tail-only val (deploy mode) early
-    # stops on loss instead.
-    monitor, mode = ("val_pr_auc", "max") if (y_va == 1.0).any() else ("val_loss", "min")
-    cb = [
-        keras.callbacks.EarlyStopping(monitor=monitor, mode=mode, patience=15,
-                                      restore_best_weights=True),
+    # Early stopping needs positives in val to be meaningful; an artefact-only
+    # val (deploy mode) is minimized by predicting artefact for everything, so
+    # deploy runs train for exactly --epochs, tuned from the CV runs' best epoch.
+    cb = []
+    if (y_va == 1.0).any():
+        cb.append(keras.callbacks.EarlyStopping(monitor="val_pr_auc", mode="max",
+                                                patience=15, restore_best_weights=True))
+    cb += [
         keras.callbacks.CSVLogger(os.path.join(out, "history.csv")),
     ]
     hist = model.fit(augment_dataset(x_tr, y_tr, w_tr, args.batch, args.seed),
