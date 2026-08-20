@@ -119,7 +119,7 @@ def make_arrays(rows, data_dir, size, args, training):
     return x, np.array(ys, np.float32), np.array(ws, np.float32)
 
 
-def augment_dataset(x, y, w, batch, seed=17):
+def augment_dataset(x, y, w, batch, seed=17, photometric=True):
     import tensorflow as tf
 
     def aug(img, label, weight):
@@ -130,9 +130,13 @@ def augment_dataset(x, y, w, batch, seed=17):
         h, wd = img.shape[0], img.shape[1]
         img = tf.image.resize_with_crop_or_pad(img, h + 6, wd + 6)
         img = tf.image.random_crop(img, (h, wd, 1))
-        img = tf.image.random_brightness(img, 0.1)
-        img = tf.image.random_contrast(img, 0.8, 1.2)
-        img = img + tf.random.normal(tf.shape(img), stddev=0.01)
+        if photometric:
+            # CAUTION: brightness/contrast jitter attacks the very cue that
+            # separates thick-bright meteor streaks from thin-faint satellite
+            # trails -- measured to collapse satellite rejection. Off for v2+.
+            img = tf.image.random_brightness(img, 0.1)
+            img = tf.image.random_contrast(img, 0.8, 1.2)
+            img = img + tf.random.normal(tf.shape(img), stddev=0.01)
         return tf.clip_by_value(img, 0.0, 1.0), label, weight
 
     ds = tf.data.Dataset.from_tensor_slices((x, y, w))
@@ -156,6 +160,7 @@ def main():
     ap.add_argument("--distill-all", action="store_true")
     ap.add_argument("--pos-weight-cap", type=float, default=5.0)
     ap.add_argument("--trail-neg-weight", type=float, default=3.0)
+    ap.add_argument("--photometric-aug", action="store_true")
     ap.add_argument("--fisheye-weight", type=float, default=0.3)
     ap.add_argument("--pseudo-labels", action="store_true")
     ap.add_argument("--seed", type=int, default=17)
@@ -195,7 +200,8 @@ def main():
     cb += [
         keras.callbacks.CSVLogger(os.path.join(out, "history.csv")),
     ]
-    hist = model.fit(augment_dataset(x_tr, y_tr, w_tr, args.batch, args.seed),
+    hist = model.fit(augment_dataset(x_tr, y_tr, w_tr, args.batch, args.seed,
+                                     photometric=args.photometric_aug),
                      validation_data=(x_va, y_va, w_va),
                      epochs=args.epochs, verbose=2, callbacks=cb)
 
