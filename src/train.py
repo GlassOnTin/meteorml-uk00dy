@@ -130,17 +130,20 @@ def augment_dataset(x, y, w, batch, seed=17, photometric=True):
         h, wd = img.shape[0], img.shape[1]
         img = tf.image.resize_with_crop_or_pad(img, h + 6, wd + 6)
         img = tf.image.random_crop(img, (h, wd, 1))
-        # Photometric jitter is CLASS-CONDITIONAL: applied to meteor-targets
-        # only. On negatives, brightness jitter destroys the thin-faint
-        # satellite vs thick-bright meteor cue (measured: satellite FP 45%);
-        # on positives it buys robustness to faint meteors. `photometric`
-        # extends it to all samples (the measured-bad v1 behaviour).
-        def jitter(im):
-            im = tf.image.random_brightness(im, 0.1)
-            im = tf.image.random_contrast(im, 0.8, 1.2)
-            return im + tf.random.normal(tf.shape(im), stddev=0.01)
-        img = tf.cond(tf.logical_or(photometric, label >= 0.5),
-                      lambda: jitter(img), lambda: img)
+        # Photometric jitter, measured on this dataset (2026-08-20 grid):
+        #   'all'     -> satellite FP ~45% (jitter destroys the thin-faint
+        #                satellite vs thick-bright meteor cue on negatives)
+        #   'meteors' -> satellite FP ~30% (positive-side jitter still teaches
+        #                faint==meteor and drags satellites up)
+        #   'none'    -> satellite FP ~9%, cost: the two faintest meteors sit
+        #                near the threshold. Best trade; the default.
+        if photometric != "none":
+            def jitter(im):
+                im = tf.image.random_brightness(im, 0.1)
+                im = tf.image.random_contrast(im, 0.8, 1.2)
+                return im + tf.random.normal(tf.shape(im), stddev=0.01)
+            img = tf.cond(tf.logical_or(photometric == "all", label >= 0.5),
+                          lambda: jitter(img), lambda: img)
         return tf.clip_by_value(img, 0.0, 1.0), label, weight
 
     ds = tf.data.Dataset.from_tensor_slices((x, y, w))
@@ -164,7 +167,7 @@ def main():
     ap.add_argument("--distill-all", action="store_true")
     ap.add_argument("--pos-weight-cap", type=float, default=5.0)
     ap.add_argument("--trail-neg-weight", type=float, default=3.0)
-    ap.add_argument("--photometric-aug", action="store_true")
+    ap.add_argument("--photometric-aug", choices=["none", "meteors", "all"], default="none")
     ap.add_argument("--fisheye-weight", type=float, default=0.3)
     ap.add_argument("--pseudo-labels", action="store_true")
     ap.add_argument("--seed", type=int, default=17)
