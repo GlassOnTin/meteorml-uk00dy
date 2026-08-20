@@ -130,7 +130,8 @@ def main():
     ap.add_argument("--tag", required=True)
     ap.add_argument("--data", default="data/ml_training")
     ap.add_argument("--base", default="runs/reconstructed/hyper_model_reconstructed.keras")
-    ap.add_argument("--val-nights", nargs="+", default=VAL_NIGHTS_DEFAULT)
+    ap.add_argument("--val-nights", nargs="*", default=VAL_NIGHTS_DEFAULT,
+                    help="empty = deploy mode: train on all nights, val = storm tail only")
     ap.add_argument("--freeze-conv1", action="store_true")
     ap.add_argument("--lr", type=float, default=1e-4)
     ap.add_argument("--epochs", type=int, default=200)
@@ -167,8 +168,11 @@ def main():
 
     out = os.path.join("runs", args.tag)
     os.makedirs(out, exist_ok=True)
+    # PR-AUC needs positives in val; a storm-tail-only val (deploy mode) early
+    # stops on loss instead.
+    monitor, mode = ("val_pr_auc", "max") if (y_va == 1.0).any() else ("val_loss", "min")
     cb = [
-        keras.callbacks.EarlyStopping(monitor="val_pr_auc", mode="max", patience=15,
+        keras.callbacks.EarlyStopping(monitor=monitor, mode=mode, patience=15,
                                       restore_best_weights=True),
         keras.callbacks.CSVLogger(os.path.join(out, "history.csv")),
     ]
