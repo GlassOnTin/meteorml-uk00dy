@@ -60,7 +60,9 @@ def make_arrays(rows, data_dir, size, args, training):
     xs, ys, ws = [], [], []
     n_pos = sum(1 for r in rows if r["label"] == "meteor")
     n_neg = sum(1 for r in rows if r["label"] == "artefact")
-    w_pos = (n_pos + n_neg) / (2.0 * n_pos) if n_pos else 0.0
+    # Inverse-frequency weighting explodes at tiny positive counts (14 positives
+    # -> ~42x, which taught v1a that any streak is a meteor); cap it.
+    w_pos = min((n_pos + n_neg) / (2.0 * n_pos), args.pos_weight_cap) if n_pos else 0.0
     w_neg = (n_pos + n_neg) / (2.0 * n_neg) if n_neg else 0.0
     for r in rows:
         label, teacher = r["label"], r["pre_ml_score"]
@@ -69,22 +71,31 @@ def make_arrays(rows, data_dir, size, args, training):
                 label = "meteor"
             elif teacher is not None and teacher < 0.1:
                 label = "artefact"
+        targets = []
         if label == "meteor":
-            y, w = 1.0, w_pos
+            targets.append((1.0, w_pos))
         elif label == "artefact":
-            y, w = 0.0, w_neg
+            targets.append((0.0, w_neg))
         elif training and args.distill > 0 and teacher is not None:
-            y, w = teacher, args.distill
-        else:
+            targets.append((teacher, args.distill))
+        # --distill-all: every crop ALSO pulls toward the teacher's score, labels
+        # included -- the anti-forgetting term that keeps hyper_model's storm and
+        # satellite priors when the labeled set is tiny. (Once every crop is
+        # labeled, plain distillation has no unlabeled rows and goes inert.)
+        if training and args.distill_all and args.distill > 0 and teacher is not None and label:
+            targets.append((teacher, args.distill))
+        if not targets:
             continue
         if r["lens"] == "fisheye":
             if not training or args.fisheye_weight <= 0:
                 continue
-            w *= args.fisheye_weight
+            targets = [(y, w * args.fisheye_weight) for y, w in targets]
         png = os.path.join(data_dir, r["night"], r["crop_png"])
-        xs.append(load_crop(png, size))
-        ys.append(y)
-        ws.append(w)
+        img = load_crop(png, size)
+        for y, w in targets:
+            xs.append(img)
+            ys.append(y)
+            ws.append(w)
     x = np.array(xs, dtype=np.float32)[..., None]
     return x, np.array(ys, np.float32), np.array(ws, np.float32)
 
@@ -122,6 +133,8 @@ def main():
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--batch", type=int, default=32)
     ap.add_argument("--distill", type=float, default=0.2)
+    ap.add_argument("--distill-all", action="store_true")
+    ap.add_argument("--pos-weight-cap", type=float, default=5.0)
     ap.add_argument("--fisheye-weight", type=float, default=0.3)
     ap.add_argument("--pseudo-labels", action="store_true")
     ap.add_argument("--seed", type=int, default=17)
