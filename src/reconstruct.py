@@ -7,8 +7,13 @@ by tensor introspection (shapes pin the strides/padding uniquely):
     Input (1,60,60,1)
     Conv2D 15 @ 10x10, stride 3, valid, ReLU   -> (17,17,15)
     Conv2D 16 @ 10x10, stride 3, valid, ReLU   -> (3,3,16)
-    MaxPool 3x3                                -> (1,1,16)
+    MaxPool 2x2, stride 2, valid               -> (1,1,16)
     Flatten -> Dense 32 ReLU -> Dense 1 sigmoid
+
+Op options confirmed by flatbuffer dump (tflite package), not inferred: both
+convs stride=3 pad=VALID act=RELU; pool is 2x2/2 VALID (on a 3x3 map it only
+sees the top-left window -- a 3x3 pool gives a different, wrong model); final
+FULLY_CONNECTED is linear followed by a separate LOGISTIC op.
 
 Gate (must pass before any fine-tuning):
   1. Keras twin reproduces the tflite scores on every banked crop, max|d| < 1e-5
@@ -62,7 +67,7 @@ def build_keras(weights, input_hw):
         keras.Input(shape=(input_hw[1], input_hw[0], 1)),
         keras.layers.Conv2D(15, 10, strides=3, padding="valid", activation="relu", name="conv1"),
         keras.layers.Conv2D(16, 10, strides=3, padding="valid", activation="relu", name="conv2"),
-        keras.layers.MaxPool2D(3, name="pool"),
+        keras.layers.MaxPool2D(pool_size=2, strides=2, padding="valid", name="pool"),
         keras.layers.Flatten(name="flatten"),
         keras.layers.Dense(32, activation="relu", name="dense1"),
         keras.layers.Dense(1, activation="sigmoid", name="dense2"),
