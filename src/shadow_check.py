@@ -17,6 +17,41 @@ import os
 import re
 
 
+def model_ab(night, v1_thr=0.42, hyper_thr=0.5):
+    """Score the night's banked crops with the stock hyper_model and compare
+    against the deployed model's manifest scores. Needs the vRMS venv (tflite).
+    -> dict(v1_keeps, hyper_keeps, recovered, lost) or raises."""
+    import csv
+    import shutil
+    import sys
+    import tempfile
+    sys.path.insert(0, "/home/ian/source/RMS")
+    from RMS.MLFilter import classifyPNGs
+    crops_dir = os.path.join(os.path.expanduser("~"), "RMS_data", "ml_training", night)
+    manifest = os.path.join(crops_dir, "manifest.csv")
+    if not os.path.isfile(manifest):
+        raise RuntimeError("no crop manifest for " + night)
+    v1 = {}
+    with open(manifest, newline="") as fh:
+        for r in csv.DictReader(fh):
+            if r.get("pre_ml_score"):
+                v1[r["crop_png"][:-4]] = float(r["pre_ml_score"])
+    if not v1:
+        raise RuntimeError("no deployed-model scores in manifest")
+    with tempfile.TemporaryDirectory() as td:
+        for f in glob.glob(os.path.join(crops_dir, "*.png")):
+            shutil.copy(f, td)
+        hyper = classifyPNGs(td, "/home/ian/source/RMS/share/hyper_model.tflite")
+    both = [(k, v1[k], float(hyper[k])) for k in hyper if k in v1]
+    return {
+        "n": len(both),
+        "v1_keeps": sum(1 for _, v, _ in both if v > v1_thr),
+        "hyper_keeps": sum(1 for _, _, h in both if h > hyper_thr),
+        "recovered": [k for k, v, h in both if v > v1_thr and h <= hyper_thr],
+        "lost": [k for k, v, h in both if h > hyper_thr and v <= v1_thr],
+    }
+
+
 def night_report(data_root):
     nights = sorted(glob.glob(os.path.join(data_root, "ArchivedFiles", "UK00DY_*")),
                     key=os.path.getmtime, reverse=True)
@@ -54,9 +89,23 @@ def night_report(data_root):
         if scores:
             break
 
+    # A/B against the stock model when the night's crops are banked: a raw
+    # filtered/unfiltered ratio can't tell over-rejection from an honestly
+    # junk-heavy night (night one: 5/131 fired the alarm, yet BOTH models
+    # rejected 126 unanimously and v1 kept a meteor hyper missed).
+    ab = None
+    try:
+        ab = model_ab(night)
+    except Exception as e:
+        print("(A/B unavailable: %s)" % e)
+
     alarms = []
-    if unfiltered and unfiltered >= 20 and filtered is not None and filtered / unfiltered < 0.10:
-        alarms.append("OVER-REJECTION? filtered/unfiltered = %d/%d (<10%% with substantial candidates)"
+    if ab is not None:
+        if ab["v1_keeps"] < ab["hyper_keeps"]:
+            alarms.append("OVER-REJECTION: deployed model kept %d vs stock %d"
+                          % (ab["v1_keeps"], ab["hyper_keeps"]))
+    elif unfiltered and unfiltered >= 20 and filtered is not None and filtered / unfiltered < 0.10:
+        alarms.append("OVER-REJECTION? filtered/unfiltered = %d/%d (<10%%; no crops for A/B)"
                       % (filtered, unfiltered))
     if unfiltered and unfiltered >= 50 and filtered is not None and filtered / unfiltered > 0.90:
         alarms.append("STORM REGRESSION? filtered/unfiltered = %d/%d (>90%% passed on a busy night)"
@@ -69,6 +118,12 @@ def night_report(data_root):
              "- unfiltered candidates: **%s**" % unfiltered,
              "- alarms: %s" % ("; ".join(alarms) if alarms else "none"),
              ""]
+    if ab is not None:
+        lines.append("- A/B on %d crops: deployed keeps **%d**, stock hyper keeps **%d**; "
+                     "recovered %s, lost %s" % (ab["n"], ab["v1_keeps"], ab["hyper_keeps"],
+                                                [k[20:38] for k in ab["recovered"]] or "none",
+                                                [k[20:38] for k in ab["lost"]] or "none"))
+        lines.append("")
     if model_line:
         lines.append("- %s" % model_line)
     if scores:
